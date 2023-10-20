@@ -21,6 +21,7 @@
 #include <pcl/filters/approximate_voxel_grid.h>
 #include <pcl/filters/radius_outlier_removal.h>
 #include <pcl/filters/statistical_outlier_removal.h>
+#include <pcl/filters/crop_box.h>
 
 namespace hdl_graph_slam {
 
@@ -92,6 +93,30 @@ private:
       std::cout << "outlier_removal: NONE" << std::endl;
     }
 
+    // Box filter settings
+    private_nh.param<bool>("use_box_filter", use_box_filter, false);
+
+    if(use_box_filter) {
+      if (!private_nh.getParam("box_filter_max_corner", box_filter_max_point) ||
+          !private_nh.getParam("box_filter_min_corner", box_filter_min_point))
+      {
+        ROS_ERROR("A box-filter corner param missing but required");
+        throw;
+      } else {
+        if (box_filter_max_point.size() != 3 || box_filter_min_point.size() != 3) {
+          ROS_ERROR("A box-filter corner has a wrong number of elements, three required.");
+          throw;
+        }
+      }
+    }
+
+    // Power filter settings
+    private_nh.param<bool>("use_power_filter", use_power_filter, false);
+    private_nh.param<std::string>("power_filter_field_name", power_filter_field_name, "power");
+    private_nh.param<double>("power_filter_lower_threshold", power_filter_lower_threshold, 70.0);
+    private_nh.param<double>("power_filter_upper_threshold", power_filter_upper_threshold, 300.0);
+
+
     use_distance_filter = private_nh.param<bool>("use_distance_filter", true);
     distance_near_thresh = private_nh.param<double>("distance_near_thresh", 1.0);
     distance_far_thresh = private_nh.param<double>("distance_far_thresh", 100.0);
@@ -103,11 +128,80 @@ private:
     imu_queue.push_back(imu_msg);
   }
 
-  void cloud_callback(const pcl::PointCloud<PointT>& src_cloud_r) {
-    pcl::PointCloud<PointT>::ConstPtr src_cloud = src_cloud_r.makeShared();
-    if(src_cloud->empty()) {
+//  void cloud_callback(const pcl::PointCloud<PointT>& src_cloud_r) {
+//    pcl::PointCloud<PointT>::ConstPtr src_cloud = src_cloud_r.makeShared();
+//    if(src_cloud->empty()) {
+//      return;
+//    }
+//
+//    src_cloud = deskewing(src_cloud);
+//
+//    // if base_link_frame is defined, transform the input cloud to the frame
+//    if(!base_link_frame.empty()) {
+//      if(!tf_listener.canTransform(base_link_frame, src_cloud->header.frame_id, ros::Time(0))) {
+//        std::cerr << "failed to find transform between " << base_link_frame << " and " << src_cloud->header.frame_id << std::endl;
+//      }
+//
+//      tf::StampedTransform transform;
+//      tf_listener.waitForTransform(base_link_frame, src_cloud->header.frame_id, ros::Time(0), ros::Duration(2.0));
+//      tf_listener.lookupTransform(base_link_frame, src_cloud->header.frame_id, ros::Time(0), transform);
+//
+//      pcl::PointCloud<PointT>::Ptr transformed(new pcl::PointCloud<PointT>());
+//      pcl_ros::transformPointCloud(*src_cloud, *transformed, transform);
+//      transformed->header.frame_id = base_link_frame;
+//      transformed->header.stamp = src_cloud->header.stamp;
+//      src_cloud = transformed;
+//    }
+//
+//    pcl::PointCloud<PointT>::ConstPtr filtered = distance_filter(src_cloud);
+//    filtered = downsample(filtered);
+//    filtered = outlier_removal(filtered);
+//
+//
+//
+//
+//    points_pub.publish(*filtered);
+//  }
+
+  void cloud_callback(const sensor_msgs::PointCloud2::ConstPtr& msg_in) {
+
+    pcl::PCLPointCloud2::Ptr pcl_pc2 (new pcl::PCLPointCloud2);
+    pcl_conversions::toPCL(*msg_in,*pcl_pc2);
+
+    if((pcl_pc2->height == 0) || (pcl_pc2->width == 0)) {
       return;
     }
+
+    pcl::PCLPointCloud2::Ptr pcl_pc2_body_filtered(new pcl::PCLPointCloud2);
+    if(use_box_filter) {
+      pcl::CropBox<pcl::PCLPointCloud2> body_points_filter(false);
+      Eigen::Vector4f min_pt(box_filter_min_point[0], box_filter_min_point[1], box_filter_min_point[2], 1.0f);
+      Eigen::Vector4f max_pt(box_filter_max_point[0], box_filter_max_point[1], box_filter_max_point[2], 1.0f);
+      body_points_filter.setInputCloud(pcl_pc2);
+      body_points_filter.setMin(min_pt);
+      body_points_filter.setMax(max_pt);
+      body_points_filter.setNegative(true);
+      body_points_filter.filter(*pcl_pc2_body_filtered);
+    }else{
+      pcl_pc2_body_filtered = pcl_pc2;
+    }
+
+    pcl::PCLPointCloud2::Ptr pcl_pc2_body_and_power_filtered (new pcl::PCLPointCloud2);
+    if(use_power_filter) {
+      pcl::PassThrough<pcl::PCLPointCloud2> power_filter;
+      power_filter.setInputCloud(pcl_pc2_body_filtered);
+      power_filter.setFilterFieldName(power_filter_field_name);
+      power_filter.setFilterLimits(power_filter_lower_threshold, power_filter_upper_threshold);
+      power_filter.filter(*pcl_pc2_body_and_power_filtered);
+    }else{
+      pcl_pc2_body_and_power_filtered = pcl_pc2_body_filtered;
+    }
+
+    pcl::PointCloud<PointT> cloud;
+    pcl::fromPCLPointCloud2(*pcl_pc2_body_and_power_filtered, cloud);
+    pcl_conversions::toPCL(msg_in->header.stamp, cloud.header.stamp);
+
+    pcl::PointCloud<PointT>::ConstPtr src_cloud = cloud.makeShared();
 
     src_cloud = deskewing(src_cloud);
 
@@ -264,6 +358,14 @@ private:
 
   pcl::Filter<PointT>::Ptr downsample_filter;
   pcl::Filter<PointT>::Ptr outlier_removal_filter;
+
+  std::vector<double> box_filter_max_point;
+  std::vector<double> box_filter_min_point;
+  bool use_box_filter;
+  bool use_power_filter;
+  std::string power_filter_field_name;
+  double power_filter_lower_threshold;
+  double power_filter_upper_threshold;
 };
 
 }  // namespace hdl_graph_slam

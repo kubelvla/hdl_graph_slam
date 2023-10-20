@@ -35,7 +35,7 @@ def main():
 
 	# get some parameters to define what default frame_id's should be used while we wait for our first odom message
 	map_frame_id = rospy.get_param('~map_frame_id', 'map')
-	odom_frame_id = rospy.get_param('~odom_frame_id', 'odom')
+	odom_frame_id = rospy.get_param('~odom_frame_id', 'lidar_odom')
 
 	node = Map2OdomPublisher(odom_frame_id, map_frame_id)	
 
