@@ -226,6 +226,12 @@ private:
     filtered = downsample(filtered);
     filtered = outlier_removal(filtered);
 
+    // if nothing left at this moment, don't pass on, just return
+    if(filtered->size()==0){
+      return;
+    }
+
+    // else publish filtered
     points_pub.publish(*filtered);
   }
 

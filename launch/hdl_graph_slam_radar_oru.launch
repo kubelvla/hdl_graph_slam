@@ -41,7 +41,9 @@
     	<remap from="input_imu" to="/imu/data" />
     	<remap from="input_twist" to="/radar_ego_velocity_estimation_node/twist" />
     	<rosparam param="imu_alignment_rpy">[0.0, 0.0, 1.5708]</rosparam>
-    	<rosparam param="radar_alignment_rpy">[-3.010, -0.000, 1.590]</rosparam>  
+    	<!--<rosparam param="radar_alignment_rpy">[-3.010, -0.000, 1.590]</rosparam>  -->
+    	<rosparam param="radar_alignment_rpy">[3.108, 0.000, 1.630]</rosparam>   <!-- Andres straight -->
+    	
     	<param name="publish_translation" value="True"/>
     	<param name="publish_identity_attitude" value="False"/>
       	<remap from="/rio_odom_fuser/odom" to="/odom" />
